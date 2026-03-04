@@ -1,0 +1,1407 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>汎用CSVデータ移行ツール (Kazu ver.)</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PapaParse (CSV Parser) CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <!-- encoding.js (Character Encoding) CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/encoding-japanese/2.0.0/encoding.min.js"></script>
+    <style>
+        /* フォント設定 */
+        body {
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+        }
+
+        /* スクロール可能なテーブルコンテナ */
+        .table-container {
+            max-height: 500px;
+            overflow-y: auto;
+            border: 1px solid #e2e8f0;
+            border-radius: 0.375rem;
+            position: relative;
+        }
+
+        /* テーブルのヘッダーを固定 */
+        .table-container thead th {
+            position: sticky;
+            top: 0;
+            background-color: #f3f4f6;
+            /* bg-gray-100 */
+            z-index: 10;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+        }
+
+        /* エラーセルのハイライト */
+        .cell-error {
+            background-color: #fee2e2 !important;
+            /* bg-red-100 */
+            border: 2px solid #f87171 !important;
+            /* border-red-400 */
+            color: #b91c1c;
+        }
+
+        /* 選択中のステップをハイライト */
+        .step-active {
+            border-color: #3b82f6;
+            /* border-blue-500 */
+            background-color: #eff6ff;
+            /* bg-blue-50 */
+        }
+
+        /* ローディングオーバーレイ */
+        #loadingOverlay {
+            backdrop-filter: blur(2px);
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100 text-gray-800">
+
+    <!-- ローディングオーバーレイ -->
+    <div id="loadingOverlay"
+        class="fixed inset-0 bg-black bg-opacity-30 z-[100] hidden flex flex-col items-center justify-center">
+        <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-white mb-4"></div>
+        <p class="text-white text-xl font-bold drop-shadow-md">処理中...</p>
+    </div>
+
+    <div class="max-w-7xl mx-auto bg-white shadow-2xl rounded-xl overflow-hidden my-4 md:my-8">
+        <header class="bg-gradient-to-r from-blue-700 to-blue-500 text-white p-6 shadow-md">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h1 class="text-2xl md:text-3xl font-bold tracking-tight">汎用CSVデータ移行ツール</h1>
+                    <p class="text-blue-100 mt-1 text-sm">ノーコードでCSVの項目マッピングとデータ変換を行います。</p>
+                </div>
+                <div class="text-right hidden md:block">
+                    <span class="text-xs bg-blue-800 py-1 px-3 rounded-full">Ver 2.3 Fixed</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- メインコンテンツ -->
+        <main class="p-4 md:p-8 space-y-8">
+
+            <!-- ステップ表示 -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+                <div id="step-indicator-1"
+                    class="step-active border-l-4 border-gray-300 p-3 md:p-4 rounded-r-lg bg-gray-50 transition-all duration-300">
+                    <span class="text-xs font-bold text-blue-600 uppercase">Step 1</span>
+                    <h3 class="text-sm md:text-lg font-bold text-gray-900">データ準備</h3>
+                </div>
+                <div id="step-indicator-2"
+                    class="border-l-4 border-gray-300 p-3 md:p-4 rounded-r-lg bg-gray-50 transition-all duration-300">
+                    <span class="text-xs font-bold text-gray-500 uppercase">Step 2</span>
+                    <h3 class="text-sm md:text-lg font-medium text-gray-900">項目マッピング</h3>
+                </div>
+                <div id="step-indicator-3"
+                    class="border-l-4 border-gray-300 p-3 md:p-4 rounded-r-lg bg-gray-50 transition-all duration-300">
+                    <span class="text-xs font-bold text-gray-500 uppercase">Step 3</span>
+                    <h3 class="text-sm md:text-lg font-medium text-gray-900">変換と修正</h3>
+                </div>
+                <div id="step-indicator-4"
+                    class="border-l-4 border-gray-300 p-3 md:p-4 rounded-r-lg bg-gray-50 transition-all duration-300">
+                    <span class="text-xs font-bold text-gray-500 uppercase">Step 4</span>
+                    <h3 class="text-sm md:text-lg font-medium text-gray-900">データ出力</h3>
+                </div>
+            </div>
+
+            <!-- ▼▼▼ ステップ1: データ準備 ▼▼▼ -->
+            <section id="step1" class="space-y-6 animate-fade-in">
+                <div class="flex items-center justify-between border-b pb-2">
+                    <h2 class="text-xl font-bold text-gray-800">ファイルのアップロード</h2>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- 移行元 (A) -->
+                    <div
+                        class="border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow bg-blue-50/30">
+                        <div class="flex items-center gap-2 mb-3">
+                            <span class="bg-blue-600 text-white text-xs font-bold px-2 py-1 rounded">FROM</span>
+                            <h3 class="text-lg font-bold text-gray-700">移行元CSV (Aシステム)</h3>
+                        </div>
+                        <p class="text-xs text-gray-500 mb-4">移行したいデータが入ったCSVファイルを選択してください。</p>
+
+                        <div class="space-y-3">
+                            <input type="file" id="sourceCsv" accept=".csv"
+                                class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200 cursor-pointer">
+
+                            <div class="flex items-center gap-3 bg-white p-2 rounded border">
+                                <label for="sourceEncoding"
+                                    class="text-xs font-bold text-gray-500 uppercase">文字コード</label>
+                                <select id="sourceEncoding"
+                                    class="text-sm border-none focus:ring-0 bg-transparent font-medium cursor-pointer">
+                                    <option value="AUTO" selected>自動検出 (推奨)</option>
+                                    <option value="SJIS">Shift_JIS (Excel等)</option>
+                                    <option value="UTF-8">UTF-8</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div id="sourcePreviewContainer" class="table-container mt-4 hidden bg-white">
+                            <table class="min-w-full divide-y divide-gray-200 text-sm">
+                                <thead class="bg-gray-50">
+                                    <tr id="sourcePreviewHeader"></tr>
+                                </thead>
+                                <tbody id="sourcePreviewBody" class="divide-y divide-gray-200"></tbody>
+                            </table>
+                        </div>
+                        <p id="sourceCount" class="text-right text-xs text-gray-500 mt-1"></p>
+                    </div>
+
+                    <!-- 移行先 (B) -->
+                    <div
+                        class="border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow bg-green-50/30">
+                        <div class="flex items-center gap-2 mb-3">
+                            <span class="bg-green-600 text-white text-xs font-bold px-2 py-1 rounded">TO</span>
+                            <h3 class="text-lg font-bold text-gray-700">移行先フォーマット (Bシステム)</h3>
+                        </div>
+                        <p class="text-xs text-gray-500 mb-4">Bシステムの項目名(ヘッダー)を持つCSVを選択してください。</p>
+
+                        <div class="space-y-3">
+                            <input type="file" id="targetCsv" accept=".csv"
+                                class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-100 file:text-green-700 hover:file:bg-green-200 cursor-pointer">
+
+                            <div class="flex items-center gap-3 bg-white p-2 rounded border">
+                                <label for="targetEncoding"
+                                    class="text-xs font-bold text-gray-500 uppercase">文字コード</label>
+                                <select id="targetEncoding"
+                                    class="text-sm border-none focus:ring-0 bg-transparent font-medium cursor-pointer">
+                                    <option value="AUTO" selected>自動検出 (推奨)</option>
+                                    <option value="SJIS">Shift_JIS (Excel等)</option>
+                                    <option value="UTF-8">UTF-8</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div id="targetPreviewContainer" class="table-container mt-4 hidden bg-white">
+                            <table class="min-w-full divide-y divide-gray-200 text-sm">
+                                <thead class="bg-gray-50">
+                                    <tr id="targetPreviewHeader"></tr>
+                                </thead>
+                                <tbody id="targetPreviewBody" class="divide-y divide-gray-200"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-end pt-4">
+                    <button id="goToStep2"
+                        class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105"
+                        disabled>
+                        次へ (項目マッピング) &rarr;
+                    </button>
+                </div>
+            </section>
+
+            <!-- ▼▼▼ ステップ2: 項目マッピング ▼▼▼ -->
+            <section id="step2" class="space-y-6 hidden">
+                <div class="flex flex-col md:flex-row gap-4 justify-between items-start md:items-end border-b pb-2">
+                    <div>
+                        <h2 class="text-xl font-bold text-gray-800">マッピング設定</h2>
+                        <p class="text-sm text-gray-600 mt-1">どの項目をどこに移すか決めてください。</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button id="saveMappingBtn"
+                            class="bg-white text-blue-600 border border-blue-600 hover:bg-blue-50 text-sm font-bold py-2 px-4 rounded shadow flex items-center transition-colors">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round" class="mr-2">
+                                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                                <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                                <polyline points="7 3 7 8 15 8"></polyline>
+                            </svg>
+                            設定保存
+                        </button>
+                        <label for="loadMappingInput"
+                            class="bg-gray-600 hover:bg-gray-700 text-white text-sm font-bold py-2 px-4 rounded shadow cursor-pointer flex items-center transition-colors">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round" class="mr-2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="17 8 12 3 7 8"></polyline>
+                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                            </svg>
+                            設定読込
+                        </label>
+                        <input type="file" id="loadMappingInput" accept=".json" class="hidden">
+                    </div>
+                </div>
+
+                <!-- マッピングテーブル -->
+                <div class="overflow-x-auto border border-gray-200 rounded-lg shadow-sm bg-white">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-100">
+                            <tr>
+                                <th scope="col"
+                                    class="px-6 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider w-[40%]">
+                                    移行元項目 (A)</th>
+                                <th scope="col"
+                                    class="px-6 py-3 text-center text-xs font-bold text-gray-600 uppercase tracking-wider w-[20%]">
+                                    変換ルール</th>
+                                <th scope="col"
+                                    class="px-6 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider w-[40%]">
+                                    移行先項目 (B)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="mappingTableBody" class="bg-white divide-y divide-gray-200">
+                            <!-- マッピング行がJSによって挿入されます -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- リアルタイムプレビュー -->
+                <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                    <h3 class="text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                        変換プレビュー (先頭10件)
+                    </h3>
+                    <div id="realtimePreviewContainer" class="table-container bg-white" style="max-height: 250px;">
+                        <table class="min-w-full divide-y divide-gray-200 text-xs">
+                            <thead id="realtimePreviewHeader" class="bg-gray-50"></thead>
+                            <tbody id="realtimePreviewBody" class="bg-white divide-y divide-gray-200"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="flex justify-between mt-6">
+                    <button id="backToStep1"
+                        class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 px-6 rounded-lg shadow transition-colors">
+                        &larr; 戻る
+                    </button>
+                    <button id="goToStep3"
+                        class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-8 rounded-lg shadow-lg transition-all transform hover:scale-105">
+                        全データ変換実行 &rarr;
+                    </button>
+                </div>
+            </section>
+
+            <!-- ▼▼▼ ステップ3: 変換と修正 ▼▼▼ -->
+            <section id="step3" class="space-y-6 hidden">
+                <div class="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center border-b pb-2">
+                    <div>
+                        <h2 class="text-xl font-bold text-gray-800">変換結果確認・修正</h2>
+                        <p class="text-sm text-gray-600 mt-1">赤色のセルはエラーです。クリックして直接編集できます。</p>
+                    </div>
+
+                    <!-- 一括置換ツール -->
+                    <div class="bg-yellow-50 border border-yellow-200 p-2 rounded-lg flex items-center gap-2 shadow-sm">
+                        <span class="text-xs font-bold text-yellow-800 whitespace-nowrap px-2">一括置換</span>
+                        <select id="bulkReplaceSelect" class="text-xs rounded border-gray-300 py-1"></select>
+                        <input type="text" id="bulkReplaceFind" placeholder="置換前"
+                            class="w-20 text-xs rounded border-gray-300 py-1">
+                        <span class="text-gray-400">&rarr;</span>
+                        <input type="text" id="bulkReplaceWith" placeholder="置換後"
+                            class="w-20 text-xs rounded border-gray-300 py-1">
+                        <button id="bulkReplaceBtn"
+                            class="bg-yellow-500 hover:bg-yellow-600 text-white text-xs font-bold py-1 px-3 rounded transition-colors">実行</button>
+                    </div>
+                </div>
+
+                <!-- 全件変換結果テーブル -->
+                <div class="relative">
+                    <div id="fullResultContainer" class="table-container bg-white shadow-inner"
+                        style="max-height: 600px;">
+                        <table class="min-w-full divide-y divide-gray-200 text-sm">
+                            <thead id="fullResultHeader" class="bg-gray-50"></thead>
+                            <tbody id="fullResultBody" class="bg-white divide-y divide-gray-200"></tbody>
+                        </table>
+                    </div>
+                    <div
+                        class="absolute bottom-2 right-4 bg-white bg-opacity-90 px-3 py-1 rounded shadow text-xs font-bold text-gray-500 pointer-events-none">
+                        合計: <span id="totalConvertedCount">0</span> 件
+                    </div>
+                </div>
+
+                <div class="flex justify-between mt-6">
+                    <button id="backToStep2"
+                        class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 px-6 rounded-lg shadow transition-colors">
+                        &larr; マッピングに戻る
+                    </button>
+                    <button id="goToStep4"
+                        class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-8 rounded-lg shadow-lg transition-all transform hover:scale-105">
+                        次へ (ダウンロード) &rarr;
+                    </button>
+                </div>
+            </section>
+
+            <!-- ▼▼▼ ステップ4: データ出力 ▼▼▼ -->
+            <section id="step4" class="space-y-6 hidden">
+                <div class="text-center py-10 space-y-6">
+                    <div class="inline-block p-4 bg-green-100 rounded-full mb-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none"
+                            stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                        </svg>
+                    </div>
+                    <h2 class="text-3xl font-bold text-gray-800">準備完了！</h2>
+                    <p class="text-gray-600 max-w-md mx-auto">データの変換と検証が完了しました。以下のボタンからCSVファイルをダウンロードして、Bシステムに取り込んでください。
+                    </p>
+
+                    <div class="bg-gray-50 max-w-lg mx-auto p-6 rounded-xl border border-gray-200 shadow-sm">
+                        <div class="flex flex-col items-center gap-4">
+                            <div class="w-full">
+                                <label for="exportEncoding"
+                                    class="block text-sm font-bold text-gray-700 mb-2 text-left">出力文字コード</label>
+                                <select id="exportEncoding"
+                                    class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm py-2">
+                                    <option value="Shift_JIS" selected>Shift_JIS (Excel / 国産業務ソフト用)</option>
+                                    <option value="UTF-8">UTF-8 (一般Webシステム用)</option>
+                                    <option value="UTF-8-BOM">UTF-8 BOM付き (Excelで文字化けしないUTF-8)</option>
+                                </select>
+                            </div>
+
+                            <button id="exportCsvBtn"
+                                class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-8 rounded-lg shadow-lg text-lg flex items-center justify-center gap-2 transition-transform transform hover:scale-105">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="7 10 12 15 17 10"></polyline>
+                                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                                </svg>
+                                CSVをダウンロード
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-start">
+                    <button id="backToStep3"
+                        class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 px-6 rounded-lg shadow transition-colors">
+                        &larr; 修正画面に戻る
+                    </button>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- ▼▼▼ 変換ルール設定モーダル ▼▼▼ -->
+    <div id="ruleModal"
+        class="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center hidden z-50 p-4 backdrop-blur-sm">
+        <div
+            class="bg-white rounded-xl shadow-2xl w-full max-w-2xl transform transition-all scale-100 flex flex-col max-h-[90vh]">
+            <div class="bg-gray-50 px-6 py-4 rounded-t-xl border-b flex justify-between items-center">
+                <h3 class="text-lg font-bold text-gray-800">
+                    変換ルール設定: <span id="modalTargetHeader" class="text-blue-600 bg-blue-50 px-2 py-1 rounded"></span>
+                </h3>
+                <button id="modalCloseX"
+                    class="text-gray-400 hover:text-gray-600 text-2xl font-bold leading-none">&times;</button>
+            </div>
+
+            <div class="p-6 space-y-6 overflow-y-auto flex-grow">
+                <input type="hidden" id="modalTargetKey">
+
+                <!-- 1. 値の生成方法 (排他選択) -->
+                <div class="space-y-4">
+                    <h4 class="text-sm font-bold text-gray-500 uppercase tracking-wide border-b pb-1">値の生成方法</h4>
+
+                    <!-- 分割 -->
+                    <div class="p-3 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors"
+                        id="containerSplit">
+                        <div class="flex items-center gap-2">
+                            <input type="radio" name="valueSource" id="modalUseSplit"
+                                class="h-4 w-4 text-blue-600 focus:ring-blue-500">
+                            <label for="modalUseSplit"
+                                class="text-sm font-bold text-gray-800 cursor-pointer">分割して取得</label>
+                        </div>
+                        <div class="mt-2 pl-6 space-y-2 text-sm text-gray-600">
+                            <p class="text-xs text-gray-500 mb-1">※移行元項目(A)の選択が必要です</p>
+                            <div class="flex items-center gap-2">
+                                <span>区切り文字:</span>
+                                <input type="text" id="modalSplitSeparator" value=" "
+                                    class="w-16 border-gray-300 rounded text-center">
+                                <span class="text-xs text-gray-500">(スペースなら全角/半角両対応)</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span>何番目?:</span>
+                                <select id="modalSplitPart" class="border-gray-300 rounded">
+                                    <option value="1">1番目</option>
+                                    <option value="2">2番目</option>
+                                    <option value="3">3番目</option>
+                                    <option value="4">4番目</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 計算式 -->
+                    <div class="p-3 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors"
+                        id="containerFormula">
+                        <div class="flex items-center gap-2">
+                            <input type="radio" name="valueSource" id="modalUseFormula"
+                                class="h-4 w-4 text-blue-600 focus:ring-blue-500">
+                            <label for="modalUseFormula" class="text-sm font-bold text-gray-800 cursor-pointer">計算式 /
+                                文字列結合</label>
+                        </div>
+                        <div class="mt-2 pl-6 space-y-2">
+                            <div class="flex gap-2">
+                                <select id="modalFormulaInsert"
+                                    class="text-xs border-gray-300 rounded max-w-[150px] truncate"></select>
+                                <button type="button" id="modalInsertBtn"
+                                    class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 font-bold">挿入</button>
+                            </div>
+                            <textarea id="modalFormula" rows="2"
+                                class="w-full text-sm border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 font-mono bg-gray-50"
+                                placeholder="例: [単価] * [数量] &#10;例: [姓] + ' ' + [名]"></textarea>
+                        </div>
+                    </div>
+
+                    <!-- 固定値 -->
+                    <div class="p-3 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors"
+                        id="containerFixed">
+                        <div class="flex items-center gap-2">
+                            <input type="radio" name="valueSource" id="modalUseFixedValue"
+                                class="h-4 w-4 text-blue-600 focus:ring-blue-500">
+                            <label for="modalUseFixedValue"
+                                class="text-sm font-bold text-gray-800 cursor-pointer">固定値</label>
+                        </div>
+                        <div class="mt-2 pl-6">
+                            <input type="text" id="modalFixedValue" class="w-full text-sm border-gray-300 rounded"
+                                placeholder="常にこの値が入ります">
+                        </div>
+                    </div>
+
+                    <!-- そのまま (デフォルト) -->
+                    <div class="p-3 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors"
+                        id="containerDirect">
+                        <div class="flex items-center gap-2">
+                            <input type="radio" name="valueSource" id="modalUseDirect"
+                                class="h-4 w-4 text-blue-600 focus:ring-blue-500" checked>
+                            <label for="modalUseDirect" class="text-sm font-bold text-gray-800 cursor-pointer">そのまま移行
+                                (またはマッピング無し)</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. 共通処理 -->
+                <div class="space-y-4 pt-4 border-t">
+                    <h4 class="text-sm font-bold text-gray-500 uppercase tracking-wide border-b pb-1">共通オプション (値確定後に実行)
+                    </h4>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="modalUseZeroPad"
+                                class="rounded text-blue-600 focus:ring-blue-500">
+                            <span class="text-sm text-gray-700">0埋め (数値化後)</span>
+                            <select id="modalZeroPadLength" class="text-xs border-gray-300 rounded ml-auto" disabled>
+                                <option value="4">4桁</option>
+                                <option value="5">5桁</option>
+                                <option value="6">6桁</option>
+                                <option value="8">8桁</option>
+                            </select>
+                        </label>
+
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="modalUseMinToHour"
+                                class="rounded text-blue-600 focus:ring-blue-500">
+                            <span class="text-sm text-gray-700">分 → [h]:mm変換</span>
+                        </label>
+
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="modalUseHoursToMin"
+                                class="rounded text-blue-600 focus:ring-blue-500">
+                            <span class="text-sm text-gray-700">時間(1.5) → 分(90) <span
+                                    class="text-xs text-green-600 font-bold">(freee推奨)</span></span>
+                        </label>
+
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="modalUseHoursToHHMM"
+                                class="rounded text-blue-600 focus:ring-blue-500">
+                            <span class="text-sm text-gray-700">時間(1.5) → [h]:mm(1:30)</span>
+                        </label>
+
+                        <div class="col-span-1 md:col-span-2">
+                            <label class="flex items-center gap-2 cursor-pointer mb-1">
+                                <input type="checkbox" id="modalUseReplace"
+                                    class="rounded text-blue-600 focus:ring-blue-500">
+                                <span class="text-sm text-gray-700">文字置換</span>
+                            </label>
+                            <div class="flex gap-2 pl-6">
+                                <input type="text" id="modalReplaceFind" placeholder="検索"
+                                    class="w-1/2 text-xs border-gray-300 rounded" disabled>
+                                <span class="text-gray-400">&rarr;</span>
+                                <input type="text" id="modalReplaceReplace" placeholder="置換"
+                                    class="w-1/2 text-xs border-gray-300 rounded" disabled>
+                            </div>
+                        </div>
+
+                        <div class="col-span-1 md:col-span-2 pt-2">
+                            <label
+                                class="flex items-center gap-2 cursor-pointer bg-red-50 p-2 rounded border border-red-100">
+                                <input type="checkbox" id="modalIsRequired"
+                                    class="rounded text-red-600 focus:ring-red-500">
+                                <span class="text-sm font-bold text-red-700">必須チェック (空ならエラーにする)</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-gray-100 px-6 py-4 rounded-b-xl flex justify-end gap-3 border-t">
+                <button type="button" id="modalCancel"
+                    class="bg-white hover:bg-gray-200 text-gray-700 font-bold py-2 px-4 border border-gray-300 rounded-lg shadow-sm transition-colors">
+                    キャンセル
+                </button>
+                <button type="button" id="modalSave"
+                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg shadow-lg transition-colors">
+                    設定保存
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- メッセージボックス -->
+    <div id="messageBox"
+        class="fixed top-5 right-5 max-w-sm bg-white border-l-4 border-red-500 shadow-xl rounded-r p-4 hidden z-[100] animate-slide-in flex items-start gap-3">
+        <div id="messageIcon"></div>
+        <div class="flex-1">
+            <p id="messageText" class="text-sm font-medium text-gray-800"></p>
+        </div>
+        <button id="messageClose" class="text-gray-400 hover:text-gray-600 font-bold">&times;</button>
+    </div>
+
+
+    <!-- ▼▼▼ JavaScript ▼▼▼ -->
+    <script>
+        // Kazuさん用: DOM要素を$で取得するヘルパー関数です
+        const $ = (id) => document.getElementById(id);
+
+        // --- グローバル変数 ---
+        let globalSourceData = [];
+        let globalSourceHeaders = [];
+        let globalTargetHeaders = [];
+        let mappingConfig = {};
+        let fullConvertedData = [];
+
+        // --- ローディング制御 ---
+        const showLoading = () => $('loadingOverlay').classList.remove('hidden');
+        const hideLoading = () => $('loadingOverlay').classList.add('hidden');
+
+        // --- HTMLエスケープ (XSS対策) ---
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // --- デフォルトの設定オブジェクト生成 ---
+        const createDefaultConfig = () => ({
+            sourceHeader: '',
+            valueSource: 'direct',
+            splitConfig: { separator: ' ', part: 1 },
+            formula: '',
+            fixedValue: '',
+            transforms: {
+                useZeroPad: false, zeroPadLength: 4,
+                useReplace: false, replaceFind: '', replaceReplace: '',
+                useMinToHour: false,
+                useHoursToMin: false,
+                useHoursToHHMM: false
+            },
+            isRequired: false
+        });
+
+        // --- 初期化 ---
+        document.addEventListener('DOMContentLoaded', () => {
+            setupEventListeners();
+            window.addEventListener('beforeunload', (e) => {
+                if (globalSourceData.length > 0) {
+                    e.preventDefault();
+                    e.returnValue = '';
+                }
+            });
+        });
+
+        // --- イベントリスナー設定 ---
+        function setupEventListeners() {
+            // ステップ1
+            $('sourceCsv').addEventListener('change', (e) => handleCsvUpload(e, 'source'));
+            $('targetCsv').addEventListener('change', (e) => handleCsvUpload(e, 'target'));
+            $('sourceEncoding').addEventListener('change', () => {
+                if ($('sourceCsv').files[0]) handleCsvUpload({ target: $('sourceCsv') }, 'source');
+            });
+            $('targetEncoding').addEventListener('change', () => {
+                if ($('targetCsv').files[0]) handleCsvUpload({ target: $('targetCsv') }, 'target');
+            });
+            $('goToStep2').addEventListener('click', () => navigateToStep(2));
+
+            // ステップ2
+            $('backToStep1').addEventListener('click', () => navigateToStep(1));
+            $('goToStep3').addEventListener('click', () => {
+                showLoading();
+                setTimeout(() => {
+                    runFullConversion();
+                    navigateToStep(3);
+                    hideLoading();
+                }, 100);
+            });
+            $('saveMappingBtn').addEventListener('click', saveMappingConfig);
+            $('loadMappingInput').addEventListener('change', loadMappingConfig);
+
+            // ステップ3
+            $('backToStep2').addEventListener('click', () => navigateToStep(2));
+            $('goToStep4').addEventListener('click', () => navigateToStep(4));
+            $('bulkReplaceBtn').addEventListener('click', applyBulkReplace);
+
+            // ステップ4
+            $('backToStep3').addEventListener('click', () => navigateToStep(3));
+            $('exportCsvBtn').addEventListener('click', exportToCsv);
+
+            // モーダル
+            $('modalCancel').addEventListener('click', closeModal);
+            $('modalCloseX').addEventListener('click', closeModal);
+            $('modalSave').addEventListener('click', saveRule);
+            $('modalInsertBtn').addEventListener('click', insertHeaderToFormula);
+
+            // モーダル内のラジオボタン制御
+            document.querySelectorAll('input[name="valueSource"]').forEach(radio => {
+                radio.addEventListener('change', updateModalInputsState);
+            });
+
+            // オプションの連動
+            $('modalUseZeroPad').addEventListener('change', (e) => {
+                $('modalZeroPadLength').disabled = !e.target.checked;
+            });
+            $('modalUseReplace').addEventListener('change', (e) => {
+                $('modalReplaceFind').disabled = !e.target.checked;
+                $('modalReplaceReplace').disabled = !e.target.checked;
+            });
+
+            // メッセージ
+            $('messageClose').addEventListener('click', () => $('messageBox').classList.add('hidden'));
+        }
+
+        // --- ステップナビゲーション ---
+        function navigateToStep(step) {
+            [1, 2, 3, 4].forEach(s => {
+                $(`step${s}`).classList.add('hidden');
+                const ind = $(`step-indicator-${s}`);
+                // 全状態クラスをリセット
+                ind.classList.remove(
+                    'step-active', 'border-blue-500', 'bg-blue-50',
+                    'border-green-400', 'bg-green-50',
+                    'border-gray-300', 'bg-gray-50'
+                );
+                const span = ind.querySelector('span');
+                span.classList.remove('text-green-600', 'text-blue-600', 'text-gray-500');
+
+                if (s < step) {
+                    // 完了したステップ
+                    ind.classList.add('border-green-400', 'bg-green-50');
+                    span.classList.add('text-green-600');
+                } else if (s === step) {
+                    // 現在のステップ
+                    ind.classList.add('step-active', 'border-blue-500', 'bg-blue-50');
+                    span.classList.add('text-blue-600');
+                } else {
+                    // 未来のステップ
+                    ind.classList.add('border-gray-300', 'bg-gray-50');
+                    span.classList.add('text-gray-500');
+                }
+            });
+            $(`step${step}`).classList.remove('hidden');
+            window.scrollTo(0, 0);
+        }
+
+        // --- CSV読み込み処理 (共通化) ---
+        function handleCsvUpload(event, type) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            showLoading();
+            const encodingChoice = $(type === 'source' ? 'sourceEncoding' : 'targetEncoding').value;
+            const reader = new FileReader();
+
+            reader.onload = (e) => {
+                try {
+                    const uint8Array = new Uint8Array(e.target.result);
+                    let detected = encodingChoice;
+
+                    if (encodingChoice === 'AUTO') {
+                        const det = Encoding.detect(uint8Array);
+                        detected = (det === 'UTF8' || det === 'SJIS') ? det : 'SJIS';
+                    }
+
+                    const text = Encoding.convert(uint8Array, {
+                        to: 'UNICODE', from: detected, type: 'string'
+                    });
+
+                    Papa.parse(text, {
+                        header: true,
+                        skipEmptyLines: true,
+                        complete: (results) => {
+                            if (type === 'source') processSourceData(results);
+                            else processTargetData(results);
+                            hideLoading();
+                        },
+                        error: (err) => {
+                            showMessage(`CSV読み込みエラー: ${err.message}`);
+                            hideLoading();
+                        }
+                    });
+                } catch (err) {
+                    console.error(err);
+                    showMessage('ファイルの読み込みに失敗しました。');
+                    hideLoading();
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // BOM削除や空白トリム
+        const cleanHeader = (h) => h ? h.replace(/^\uFEFF/, '').trim().replace(/^"|"$/g, '') : '';
+
+        function processSourceData(results) {
+            if (!results.data || results.data.length === 0) {
+                showMessage('データが空です。');
+                return;
+            }
+            const originalHeaders = results.meta.fields;
+            globalSourceHeaders = originalHeaders.map(cleanHeader);
+
+            globalSourceData = results.data
+                .filter(row => row && typeof row === 'object')
+                .map(row => {
+                    const newRow = {};
+                    originalHeaders.forEach((h, i) => {
+                        newRow[globalSourceHeaders[i]] = row[h];
+                    });
+                    return newRow;
+                });
+
+            renderPreviewTable('sourcePreviewHeader', 'sourcePreviewBody', globalSourceHeaders, globalSourceData.slice(0, 5));
+            $('sourcePreviewContainer').classList.remove('hidden');
+            $('sourceCount').textContent = `データ件数: ${globalSourceData.length.toLocaleString()} 件`;
+            checkStep1Completion();
+        }
+
+        function processTargetData(results) {
+            if (!results.meta.fields) {
+                showMessage('ヘッダーが取得できませんでした。');
+                return;
+            }
+            globalTargetHeaders = results.meta.fields.map(cleanHeader);
+
+            const previewData = (results.data || [])
+                .filter(row => row && typeof row === 'object')
+                .slice(0, 5)
+                .map(row => {
+                    const newRow = {};
+                    results.meta.fields.forEach((h, i) => {
+                        newRow[globalTargetHeaders[i]] = row[h];
+                    });
+                    return newRow;
+                });
+
+            renderPreviewTable('targetPreviewHeader', 'targetPreviewBody', globalTargetHeaders, previewData);
+            $('targetPreviewContainer').classList.remove('hidden');
+            initializeMappingConfig();
+            renderMappingUi();
+            checkStep1Completion();
+        }
+
+        function renderPreviewTable(headId, bodyId, headers, data) {
+            const thead = $(headId);
+            thead.innerHTML = '';
+            headers.forEach(h => {
+                const th = document.createElement('th');
+                th.className = "px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap bg-gray-50 border-b";
+                th.textContent = h;
+                thead.appendChild(th);
+            });
+
+            const tbody = $(bodyId);
+            tbody.innerHTML = '';
+            data.forEach(row => {
+                const tr = document.createElement('tr');
+                headers.forEach(h => {
+                    const td = document.createElement('td');
+                    td.className = "px-4 py-2 whitespace-nowrap text-xs text-gray-700 border-b";
+                    td.textContent = row[h] || '';
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+        }
+
+        function checkStep1Completion() {
+            if (globalSourceData.length > 0 && globalTargetHeaders.length > 0) {
+                $('goToStep2').disabled = false;
+            }
+        }
+
+        // --- Step 2: マッピングUI ---
+        function initializeMappingConfig() {
+            if (Object.keys(mappingConfig).length === 0) {
+                globalTargetHeaders.forEach(h => {
+                    mappingConfig[h] = createDefaultConfig();
+                    if (globalSourceHeaders.includes(h)) {
+                        mappingConfig[h].sourceHeader = h;
+                    }
+                });
+            }
+        }
+
+        function renderMappingUi() {
+            const tbody = $('mappingTableBody');
+            tbody.innerHTML = '';
+
+            // ドロップダウンの選択肢を安全に生成 (XSS対策)
+            const createSourceOptions = (selectedValue) => {
+                const select = document.createElement('select');
+                select.className = "block w-full text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400";
+
+                const emptyOpt = document.createElement('option');
+                emptyOpt.value = '';
+                emptyOpt.textContent = '(マッピングなし)';
+                select.appendChild(emptyOpt);
+
+                globalSourceHeaders.forEach(h => {
+                    const opt = document.createElement('option');
+                    opt.value = h;
+                    opt.textContent = h;
+                    select.appendChild(opt);
+                });
+
+                select.value = selectedValue;
+                return select;
+            };
+
+            globalTargetHeaders.forEach(targetKey => {
+                const config = mappingConfig[targetKey] || createDefaultConfig();
+                const tr = document.createElement('tr');
+
+                // 1. 移行元選択 (A)
+                const tdSource = document.createElement('td');
+                tdSource.className = "px-6 py-3";
+
+                const select = createSourceOptions(config.sourceHeader);
+                select.disabled = (config.valueSource === 'fixed' || config.valueSource === 'formula');
+                select.addEventListener('change', (e) => {
+                    mappingConfig[targetKey].sourceHeader = e.target.value;
+                    updateRealtimePreview();
+                });
+                tdSource.appendChild(select);
+
+                // 2. ルールボタン
+                const tdRule = document.createElement('td');
+                tdRule.className = "px-6 py-3 text-center";
+                const btn = document.createElement('button');
+
+                let ruleText = "ルール設定";
+                let btnClass = "bg-white border border-gray-300 text-gray-700 hover:bg-gray-50";
+
+                if (config.valueSource !== 'direct' || config.transforms.useZeroPad ||
+                    config.transforms.useReplace || config.isRequired || config.transforms.useMinToHour ||
+                    config.transforms.useHoursToMin || config.transforms.useHoursToHHMM) {
+                    btnClass = "bg-blue-50 border border-blue-300 text-blue-700 hover:bg-blue-100 font-bold";
+                    if (config.valueSource === 'formula') ruleText = "計算式";
+                    else if (config.valueSource === 'fixed') ruleText = "固定値";
+                    else if (config.valueSource === 'split') ruleText = "分割";
+                    else ruleText = "加工あり";
+                }
+
+                btn.className = `py-1 px-3 rounded text-xs transition-colors ${btnClass}`;
+                btn.textContent = ruleText;
+                btn.addEventListener('click', () => openRuleModal(targetKey));
+                tdRule.appendChild(btn);
+
+                // 3. 移行先 (B)
+                const tdTarget = document.createElement('td');
+                tdTarget.className = "px-6 py-3 text-sm font-bold text-gray-700";
+                tdTarget.textContent = targetKey;
+                if (config.isRequired) {
+                    const reqSpan = document.createElement('span');
+                    reqSpan.className = "text-red-500 text-xs ml-1";
+                    reqSpan.textContent = "*必須";
+                    tdTarget.appendChild(reqSpan);
+                }
+
+                tr.appendChild(tdSource);
+                tr.appendChild(tdRule);
+                tr.appendChild(tdTarget);
+                tbody.appendChild(tr);
+            });
+
+            updateRealtimePreview();
+        }
+
+        // --- リアルタイムプレビュー & データ変換ロジック ---
+        function updateRealtimePreview() {
+            const head = $('realtimePreviewHeader');
+            const body = $('realtimePreviewBody');
+            head.innerHTML = '';
+            body.innerHTML = '';
+
+            const trH = document.createElement('tr');
+            globalTargetHeaders.forEach(h => {
+                const th = document.createElement('th');
+                th.className = "px-4 py-2 text-left font-medium text-gray-500 bg-gray-50 whitespace-nowrap";
+                th.textContent = h;
+                trH.appendChild(th);
+            });
+            head.appendChild(trH);
+
+            const previewRows = globalSourceData.slice(0, 10);
+            previewRows.forEach(row => {
+                const tr = document.createElement('tr');
+                globalTargetHeaders.forEach(targetKey => {
+                    const config = mappingConfig[targetKey];
+                    const result = applyTransformation(row, config);
+
+                    const td = document.createElement('td');
+                    td.className = "px-4 py-2 whitespace-nowrap border-b text-gray-700";
+                    td.textContent = result.value;
+                    if (result.error) {
+                        td.classList.add('bg-red-50', 'text-red-600');
+                    }
+                    tr.appendChild(td);
+                });
+                body.appendChild(tr);
+            });
+        }
+
+        // ★★★ 核心となる変換ロジック ★★★
+        function applyTransformation(row, config) {
+            if (!row || !config) return { value: '', error: null };
+
+            let value = '';
+            let error = null;
+
+            try {
+                // 1. 値の取得フェーズ
+                if (config.valueSource === 'fixed') {
+                    value = config.fixedValue;
+                } else if (config.valueSource === 'formula') {
+                    let expression = config.formula;
+                    const headers = [...new Set(expression.match(/\[(.*?)\]/g) || [])];
+
+                    headers.forEach(bracketHeader => {
+                        const headerName = bracketHeader.slice(1, -1);
+                        let rawVal = row[headerName];
+                        if (rawVal === undefined) rawVal = '';
+
+                        if (isNaN(rawVal) || rawVal === '') {
+                            const safeStr = String(rawVal).replace(/"/g, '\\"').replace(/\n/g, '\\n');
+                            expression = expression.split(bracketHeader).join(`"${safeStr}"`);
+                        } else {
+                            expression = expression.split(bracketHeader).join(rawVal);
+                        }
+                    });
+
+                    try {
+                        value = new Function(`return ${expression}`)();
+                    } catch (e) {
+                        value = '';
+                        error = '計算エラー';
+                    }
+                } else if (config.valueSource === 'split') {
+                    const src = row[config.sourceHeader] || '';
+                    const sep = config.splitConfig.separator;
+                    const idx = config.splitConfig.part - 1;
+
+                    let parts;
+                    if (sep === ' ') {
+                        parts = String(src).replace(/　/g, ' ').trim().split(/\s+/);
+                    } else {
+                        parts = String(src).split(sep);
+                    }
+                    value = parts[idx] !== undefined ? parts[idx] : '';
+                } else {
+                    value = config.sourceHeader ? (row[config.sourceHeader] || '') : '';
+                }
+
+                // 2. 共通加工フェーズ
+                if (config.transforms.useZeroPad) {
+                    const num = parseInt(value, 10);
+                    if (!isNaN(num)) {
+                        value = String(num).padStart(config.transforms.zeroPadLength, '0');
+                    }
+                }
+                if (config.transforms.useReplace && config.transforms.replaceFind) {
+                    value = String(value).split(config.transforms.replaceFind).join(config.transforms.replaceReplace);
+                }
+                if (config.transforms.useMinToHour) {
+                    const min = parseInt(value, 10);
+                    if (!isNaN(min)) {
+                        const h = Math.floor(min / 60);
+                        const m = min % 60;
+                        value = `${h}:${String(m).padStart(2, '0')}`;
+                    }
+                }
+                if (config.transforms.useHoursToMin) {
+                    const hours = parseFloat(value);
+                    if (!isNaN(hours)) {
+                        value = String(Math.round(hours * 60));
+                    }
+                }
+                if (config.transforms.useHoursToHHMM) {
+                    const val = parseFloat(value);
+                    if (!isNaN(val)) {
+                        let h = Math.floor(val);
+                        let m = Math.round((val - h) * 60);
+                        if (m === 60) { h++; m = 0; }
+                        value = `${h}:${String(m).padStart(2, '0')}`;
+                    }
+                }
+
+                value = String(value);
+
+                // 3. バリデーション
+                if (config.isRequired && value.trim() === '') {
+                    error = '必須エラー';
+                }
+            } catch (e) {
+                console.error(e);
+                error = 'システムエラー';
+            }
+
+            return { value, error };
+        }
+
+        // --- 全件変換実行 ---
+        function runFullConversion() {
+            fullConvertedData = [];
+            const head = $('fullResultHeader');
+            const body = $('fullResultBody');
+
+            head.innerHTML = '';
+            const trH = document.createElement('tr');
+            globalTargetHeaders.forEach(h => {
+                const th = document.createElement('th');
+                th.className = "px-4 py-3 text-left text-xs font-bold text-gray-600 bg-gray-100 whitespace-nowrap sticky top-0";
+                th.textContent = h;
+                trH.appendChild(th);
+            });
+            head.appendChild(trH);
+
+            body.innerHTML = '';
+            const fragment = document.createDocumentFragment();
+            let errorCount = 0;
+
+            globalSourceData.forEach((row, index) => {
+                if (!row) return;
+
+                const newRowObj = {};
+                const tr = document.createElement('tr');
+
+                globalTargetHeaders.forEach(targetKey => {
+                    const config = mappingConfig[targetKey];
+                    const res = applyTransformation(row, config);
+
+                    newRowObj[targetKey] = res.value;
+
+                    const td = document.createElement('td');
+                    td.className = "px-4 py-2 text-sm border-b whitespace-nowrap cursor-text hover:bg-blue-50 transition-colors";
+                    td.textContent = res.value;
+                    td.dataset.row = index;
+                    td.dataset.key = targetKey;
+
+                    if (res.error) {
+                        td.classList.add('cell-error');
+                        td.title = res.error;
+                        errorCount++;
+                    }
+
+                    td.onclick = function () { makeEditable(this); };
+                    tr.appendChild(td);
+                });
+
+                fullConvertedData.push(newRowObj);
+                fragment.appendChild(tr);
+            });
+
+            body.appendChild(fragment);
+            $('totalConvertedCount').textContent = fullConvertedData.length.toLocaleString();
+
+            if (errorCount > 0) {
+                showMessage(`${errorCount}箇所のデータエラーが見つかりました。赤色のセルを確認してください。`, 'error');
+            } else {
+                showMessage('変換完了！エラーはありませんでした。', 'success');
+            }
+
+            // 一括置換用セレクトボックス更新 (XSS対策: DOMで生成)
+            const bulkSel = $('bulkReplaceSelect');
+            bulkSel.innerHTML = '';
+            globalTargetHeaders.forEach(h => {
+                const opt = document.createElement('option');
+                opt.value = h;
+                opt.textContent = h;
+                bulkSel.appendChild(opt);
+            });
+        }
+
+        // --- セル編集機能 ---
+        function makeEditable(td) {
+            if (td.querySelector('input')) return;
+
+            const currentVal = td.textContent;
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = currentVal;
+            input.className = "w-full h-full p-1 border-2 border-blue-500 rounded focus:outline-none";
+
+            const save = () => {
+                const newVal = input.value;
+                td.textContent = newVal;
+                const rowIdx = td.dataset.row;
+                const key = td.dataset.key;
+                fullConvertedData[rowIdx][key] = newVal;
+
+                const config = mappingConfig[key];
+                if (config && config.isRequired && newVal.trim() === '') {
+                    td.classList.add('cell-error');
+                } else {
+                    td.classList.remove('cell-error');
+                }
+            };
+
+            input.onblur = save;
+            input.onkeydown = (e) => {
+                if (e.key === 'Enter') input.blur();
+            };
+
+            td.innerHTML = '';
+            td.appendChild(input);
+            input.focus();
+        }
+
+        // --- 一括置換 (部分一致対応) ---
+        function applyBulkReplace() {
+            const key = $('bulkReplaceSelect').value;
+            const findStr = $('bulkReplaceFind').value;
+            const repStr = $('bulkReplaceWith').value;
+
+            if (!findStr) return;
+
+            let count = 0;
+            fullConvertedData.forEach((row, idx) => {
+                if (row[key] && row[key].includes(findStr)) {
+                    row[key] = row[key].split(findStr).join(repStr);
+                    count++;
+                    const td = document.querySelector(`td[data-row="${idx}"][data-key="${key}"]`);
+                    if (td) {
+                        td.textContent = row[key];
+                        if (mappingConfig[key].isRequired && row[key].trim() === '') {
+                            td.classList.add('cell-error');
+                        } else {
+                            td.classList.remove('cell-error');
+                        }
+                    }
+                }
+            });
+            showMessage(`${count}件 置換しました`, 'success');
+        }
+
+        // --- CSVエクスポート ---
+        function exportToCsv() {
+            const encoding = $('exportEncoding').value;
+
+            const csv = Papa.unparse(fullConvertedData, { header: true });
+
+            let blob;
+            if (encoding === 'Shift_JIS') {
+                const strArray = Encoding.stringToCode(csv);
+                const sjisArray = Encoding.convert(strArray, { to: 'SJIS', from: 'UNICODE' });
+                blob = new Blob([new Uint8Array(sjisArray)], { type: 'text/csv;charset=Shift_JIS;' });
+            } else if (encoding === 'UTF-8-BOM') {
+                const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+                blob = new Blob([bom, csv], { type: 'text/csv;charset=UTF-8;' });
+            } else {
+                blob = new Blob([csv], { type: 'text/csv;charset=UTF-8;' });
+            }
+
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `migrated_data_${new Date().toISOString().slice(0, 10)}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // --- モーダル制御 ---
+        function openRuleModal(targetKey) {
+            $('modalTargetKey').value = targetKey;
+            $('modalTargetHeader').textContent = targetKey;
+            const config = mappingConfig[targetKey];
+
+            // ラジオボタン設定
+            document.querySelectorAll('input[name="valueSource"]').forEach(r => r.checked = false);
+            if (config.valueSource === 'split') $('modalUseSplit').checked = true;
+            else if (config.valueSource === 'formula') $('modalUseFormula').checked = true;
+            else if (config.valueSource === 'fixed') $('modalUseFixedValue').checked = true;
+            else $('modalUseDirect').checked = true;
+
+            // 各種値の復元
+            $('modalSplitSeparator').value = config.splitConfig.separator;
+            $('modalSplitPart').value = config.splitConfig.part;
+            $('modalFormula').value = config.formula;
+            $('modalFixedValue').value = config.fixedValue;
+            $('modalUseZeroPad').checked = config.transforms.useZeroPad;
+            $('modalZeroPadLength').value = config.transforms.zeroPadLength;
+            $('modalUseReplace').checked = config.transforms.useReplace;
+            $('modalReplaceFind').value = config.transforms.replaceFind;
+            $('modalReplaceReplace').value = config.transforms.replaceReplace;
+            $('modalUseMinToHour').checked = config.transforms.useMinToHour;
+            $('modalUseHoursToMin').checked = config.transforms.useHoursToMin || false;
+            $('modalUseHoursToHHMM').checked = config.transforms.useHoursToHHMM || false;
+            $('modalIsRequired').checked = config.isRequired;
+
+            // 挿入用セレクトボックス (XSS対策: DOMで生成)
+            const sel = $('modalFormulaInsert');
+            sel.innerHTML = '';
+            globalSourceHeaders.forEach(h => {
+                const opt = document.createElement('option');
+                opt.value = h;
+                opt.textContent = h;
+                sel.appendChild(opt);
+            });
+
+            updateModalInputsState();
+            $('ruleModal').classList.remove('hidden');
+        }
+
+        function updateModalInputsState() {
+            const mode = document.querySelector('input[name="valueSource"]:checked').id;
+
+            ['containerSplit', 'containerFormula', 'containerFixed', 'containerDirect'].forEach(id => {
+                $(id).classList.remove('bg-blue-50', 'border-blue-400');
+            });
+
+            if (mode === 'modalUseSplit') {
+                $('containerSplit').classList.add('bg-blue-50', 'border-blue-400');
+            } else if (mode === 'modalUseFormula') {
+                $('containerFormula').classList.add('bg-blue-50', 'border-blue-400');
+            } else if (mode === 'modalUseFixedValue') {
+                $('containerFixed').classList.add('bg-blue-50', 'border-blue-400');
+            } else {
+                $('containerDirect').classList.add('bg-blue-50', 'border-blue-400');
+            }
+        }
+
+        function saveRule() {
+            const key = $('modalTargetKey').value;
+            const config = mappingConfig[key];
+
+            if ($('modalUseSplit').checked) config.valueSource = 'split';
+            else if ($('modalUseFormula').checked) config.valueSource = 'formula';
+            else if ($('modalUseFixedValue').checked) config.valueSource = 'fixed';
+            else config.valueSource = 'direct';
+
+            config.splitConfig = {
+                separator: $('modalSplitSeparator').value,
+                part: parseInt($('modalSplitPart').value)
+            };
+            config.formula = $('modalFormula').value;
+            config.fixedValue = $('modalFixedValue').value;
+
+            config.transforms.useZeroPad = $('modalUseZeroPad').checked;
+            config.transforms.zeroPadLength = parseInt($('modalZeroPadLength').value);
+            config.transforms.useReplace = $('modalUseReplace').checked;
+            config.transforms.replaceFind = $('modalReplaceFind').value;
+            config.transforms.replaceReplace = $('modalReplaceReplace').value;
+            config.transforms.useMinToHour = $('modalUseMinToHour').checked;
+            config.transforms.useHoursToMin = $('modalUseHoursToMin').checked;
+            config.transforms.useHoursToHHMM = $('modalUseHoursToHHMM').checked;
+
+            config.isRequired = $('modalIsRequired').checked;
+
+            closeModal();
+            renderMappingUi();
+        }
+
+        function insertHeaderToFormula() {
+            const val = `[${$('modalFormulaInsert').value}]`;
+            const field = $('modalFormula');
+            const start = field.selectionStart;
+            const end = field.selectionEnd;
+            const text = field.value;
+            field.value = text.substring(0, start) + val + text.substring(end);
+            field.focus();
+            field.selectionEnd = start + val.length;
+        }
+
+        function closeModal() {
+            $('ruleModal').classList.add('hidden');
+        }
+
+        function saveMappingConfig() {
+            const data = {
+                targetHeaders: globalTargetHeaders,
+                mapping: mappingConfig
+            };
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'migration_config.json';
+            a.click();
+            showMessage('設定を保存しました', 'success');
+        }
+
+        function loadMappingConfig(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                try {
+                    const data = JSON.parse(ev.target.result);
+                    if (JSON.stringify(data.targetHeaders) === JSON.stringify(globalTargetHeaders)) {
+                        mappingConfig = data.mapping;
+                        renderMappingUi();
+                        showMessage('設定を読み込みました', 'success');
+                    } else {
+                        // 不一致でも読み込みを試みる (警告タイプで表示)
+                        showMessage('注意: 移行先の項目定義が完全に一致しませんが、読み込みを試みます。', 'warning');
+                        Object.keys(data.mapping).forEach(k => {
+                            if (mappingConfig[k]) mappingConfig[k] = data.mapping[k];
+                        });
+                        renderMappingUi();
+                    }
+                } catch (err) {
+                    showMessage('設定ファイルの読み込みに失敗しました');
+                }
+            };
+            reader.readAsText(file);
+            e.target.value = '';
+        }
+
+        // --- メッセージ表示 (success / warning / error 対応) ---
+        function showMessage(text, type = 'error') {
+            const box = $('messageBox');
+            const txt = $('messageText');
+            const icon = $('messageIcon');
+
+            txt.textContent = text;
+
+            // 全色クラスをリセット
+            box.classList.remove('border-red-500', 'border-green-500', 'border-yellow-500');
+
+            if (type === 'success') {
+                box.classList.add('border-green-500');
+                icon.innerHTML = '<svg class="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>';
+            } else if (type === 'warning') {
+                box.classList.add('border-yellow-500');
+                icon.innerHTML = '<svg class="w-6 h-6 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"></path></svg>';
+            } else {
+                box.classList.add('border-red-500');
+                icon.innerHTML = '<svg class="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>';
+            }
+
+            box.classList.remove('hidden');
+            setTimeout(() => box.classList.add('hidden'), 4000);
+        }
+    </script>
+
+</body>
+
+</html>
