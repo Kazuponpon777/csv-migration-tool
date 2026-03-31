@@ -426,8 +426,35 @@
                                 <select id="modalSplitPart" class="border-gray-300 rounded">
                                     <option value="1">1番目</option>
                                     <option value="2">2番目</option>
+                                    <option value="2+">2番目以降すべて</option>
                                     <option value="3">3番目</option>
                                     <option value="4">4番目</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 文字数で分割 (NEW) -->
+                    <div class="p-3 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors"
+                        id="containerLength">
+                        <div class="flex items-center gap-2">
+                            <input type="radio" name="valueSource" id="modalUseLength"
+                                class="h-4 w-4 text-blue-600 focus:ring-blue-500">
+                            <label for="modalUseLength"
+                                class="text-sm font-bold text-gray-800 cursor-pointer">文字数で分割</label>
+                        </div>
+                        <div class="mt-2 pl-6 space-y-2 text-sm text-gray-600">
+                            <div class="flex items-center gap-2">
+                                <span>先頭から</span>
+                                <input type="number" id="modalLengthCount" value="2" min="1"
+                                    class="w-16 border-gray-300 rounded text-center">
+                                <span>文字を対象に</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span>抽出内容:</span>
+                                <select id="modalLengthPart" class="border-gray-300 rounded">
+                                    <option value="first">指定文字数のみ取得 (苗字など)</option>
+                                    <option value="remaining">指定文字数目以降すべて取得 (名前など)</option>
                                 </select>
                             </div>
                         </div>
@@ -598,6 +625,7 @@
             sourceHeader: '',
             valueSource: 'direct',
             splitConfig: { separator: ' ', part: 1 },
+            lengthConfig: { length: 2, part: 'first' }, // 追加
             formula: '',
             fixedValue: '',
             transforms: {
@@ -907,6 +935,7 @@
                     if (config.valueSource === 'formula') ruleText = "計算式";
                     else if (config.valueSource === 'fixed') ruleText = "固定値";
                     else if (config.valueSource === 'split') ruleText = "分割";
+                    else if (config.valueSource === 'length') ruleText = "文字数";
                     else ruleText = "加工あり";
                 }
 
@@ -988,34 +1017,51 @@
                     headers.forEach(bracketHeader => {
                         const headerName = bracketHeader.slice(1, -1);
                         let rawVal = row[headerName];
-                        if (rawVal === undefined) rawVal = '';
+                        if (rawVal === undefined || rawVal === null) rawVal = '';
 
-                        if (isNaN(rawVal) || rawVal === '') {
-                            const safeStr = String(rawVal).replace(/"/g, '\\"').replace(/\n/g, '\\n');
-                            expression = expression.split(bracketHeader).join(`"${safeStr}"`);
-                        } else {
-                            expression = expression.split(bracketHeader).join(rawVal);
-                        }
+                        // 安全策: 文字列結合を想定し、常にダブルクォートで囲む(エスケープ処理付き)
+                        // 数字のみの場合でも文字列として扱うことで「0123」等の消滅や意図しない足し算を防ぐ
+                        const safeStr = String(rawVal).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+                        expression = expression.split(bracketHeader).join(`"${safeStr}"`);
                     });
 
                     try {
                         value = new Function(`return ${expression}`)();
                     } catch (e) {
+                        console.error('Formula Error:', e, expression);
                         value = '';
                         error = '計算エラー';
                     }
                 } else if (config.valueSource === 'split') {
                     const src = row[config.sourceHeader] || '';
                     const sep = config.splitConfig.separator;
-                    const idx = config.splitConfig.part - 1;
+                    const partVal = config.splitConfig.part; // "1", "2", "2+" など
 
                     let parts;
-                    if (sep === ' ') {
+                    // スペース（半角・全角）の場合は特殊処理
+                    if (sep === ' ' || sep === '　' || sep === '') {
                         parts = String(src).replace(/　/g, ' ').trim().split(/\s+/);
                     } else {
-                        parts = String(src).split(sep);
+                        parts = String(src).split(sep).map(p => p.trim());
                     }
-                    value = parts[idx] !== undefined ? parts[idx] : '';
+
+                    if (String(partVal).endsWith('+')) {
+                        const idx = parseInt(partVal, 10) - 1;
+                        value = parts.slice(idx).join(' ');
+                    } else {
+                        const idx = parseInt(partVal, 10) - 1;
+                        value = parts[idx] !== undefined ? parts[idx] : '';
+                    }
+                } else if (config.valueSource === 'length') {
+                    const src = String(row[config.sourceHeader] || '');
+                    const len = parseInt(config.lengthConfig.length, 10) || 0;
+                    const part = config.lengthConfig.part;
+
+                    if (part === 'first') {
+                        value = src.substring(0, len);
+                    } else {
+                        value = src.substring(len);
+                    }
                 } else {
                     value = config.sourceHeader ? (row[config.sourceHeader] || '') : '';
                 }
@@ -1237,6 +1283,7 @@
             // ラジオボタン設定
             document.querySelectorAll('input[name="valueSource"]').forEach(r => r.checked = false);
             if (config.valueSource === 'split') $('modalUseSplit').checked = true;
+            else if (config.valueSource === 'length') $('modalUseLength').checked = true;
             else if (config.valueSource === 'formula') $('modalUseFormula').checked = true;
             else if (config.valueSource === 'fixed') $('modalUseFixedValue').checked = true;
             else $('modalUseDirect').checked = true;
@@ -1244,6 +1291,8 @@
             // 各種値の復元
             $('modalSplitSeparator').value = config.splitConfig.separator;
             $('modalSplitPart').value = config.splitConfig.part;
+            $('modalLengthCount').value = config.lengthConfig.length;
+            $('modalLengthPart').value = config.lengthConfig.part;
             $('modalFormula').value = config.formula;
             $('modalFixedValue').value = config.fixedValue;
             $('modalUseZeroPad').checked = config.transforms.useZeroPad;
@@ -1273,12 +1322,14 @@
         function updateModalInputsState() {
             const mode = document.querySelector('input[name="valueSource"]:checked').id;
 
-            ['containerSplit', 'containerFormula', 'containerFixed', 'containerDirect'].forEach(id => {
+            ['containerSplit', 'containerLength', 'containerFormula', 'containerFixed', 'containerDirect'].forEach(id => {
                 $(id).classList.remove('bg-blue-50', 'border-blue-400');
             });
 
             if (mode === 'modalUseSplit') {
                 $('containerSplit').classList.add('bg-blue-50', 'border-blue-400');
+            } else if (mode === 'modalUseLength') {
+                $('containerLength').classList.add('bg-blue-50', 'border-blue-400');
             } else if (mode === 'modalUseFormula') {
                 $('containerFormula').classList.add('bg-blue-50', 'border-blue-400');
             } else if (mode === 'modalUseFixedValue') {
@@ -1293,13 +1344,18 @@
             const config = mappingConfig[key];
 
             if ($('modalUseSplit').checked) config.valueSource = 'split';
+            else if ($('modalUseLength').checked) config.valueSource = 'length';
             else if ($('modalUseFormula').checked) config.valueSource = 'formula';
             else if ($('modalUseFixedValue').checked) config.valueSource = 'fixed';
             else config.valueSource = 'direct';
 
             config.splitConfig = {
                 separator: $('modalSplitSeparator').value,
-                part: parseInt($('modalSplitPart').value)
+                part: $('modalSplitPart').value
+            };
+            config.lengthConfig = {
+                length: parseInt($('modalLengthCount').value, 10) || 2,
+                part: $('modalLengthPart').value
             };
             config.formula = $('modalFormula').value;
             config.fixedValue = $('modalFixedValue').value;
