@@ -77,7 +77,7 @@
                     <p class="text-blue-100 mt-1 text-sm">ノーコードでCSVの項目マッピングとデータ変換を行います。</p>
                 </div>
                 <div class="text-right hidden md:block">
-                    <span class="text-xs bg-blue-800 py-1 px-3 rounded-full">Ver 2.3 Fixed</span>
+                    <span class="text-xs bg-blue-800 py-1 px-3 rounded-full">Ver 3.0</span>
                 </div>
             </div>
         </header>
@@ -613,12 +613,7 @@
         const showLoading = () => $('loadingOverlay').classList.remove('hidden');
         const hideLoading = () => $('loadingOverlay').classList.add('hidden');
 
-        // --- HTMLエスケープ (XSS対策) ---
-        function escapeHtml(str) {
-            const div = document.createElement('div');
-            div.textContent = str;
-            return div.innerHTML;
-        }
+
 
         // --- デフォルトの設定オブジェクト生成 ---
         const createDefaultConfig = () => ({
@@ -1019,10 +1014,15 @@
                         let rawVal = row[headerName];
                         if (rawVal === undefined || rawVal === null) rawVal = '';
 
-                        // 安全策: 文字列結合を想定し、常にダブルクォートで囲む(エスケープ処理付き)
-                        // 数字のみの場合でも文字列として扱うことで「0123」等の消滅や意図しない足し算を防ぐ
-                        const safeStr = String(rawVal).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
-                        expression = expression.split(bracketHeader).join(`"${safeStr}"`);
+                        // スマートクォート: 数値はそのまま展開（四則演算を可能に）、
+                        // 非数値・空文字はダブルクォートで囲む（文字列結合用）
+                        const strVal = String(rawVal);
+                        if (strVal !== '' && !isNaN(rawVal) && strVal.trim() !== '') {
+                            expression = expression.split(bracketHeader).join(strVal);
+                        } else {
+                            const safeStr = strVal.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+                            expression = expression.split(bracketHeader).join(`"${safeStr}"`);
+                        }
                     });
 
                     try {
@@ -1054,8 +1054,9 @@
                     }
                 } else if (config.valueSource === 'length') {
                     const src = String(row[config.sourceHeader] || '');
-                    const len = parseInt(config.lengthConfig.length, 10) || 0;
-                    const part = config.lengthConfig.part;
+                    const lc = config.lengthConfig || { length: 2, part: 'first' };
+                    const len = parseInt(lc.length, 10) || 0;
+                    const part = lc.part;
 
                     if (part === 'first') {
                         value = src.substring(0, len);
@@ -1234,7 +1235,8 @@
                 if (row[key] && row[key].includes(findStr)) {
                     row[key] = row[key].split(findStr).join(repStr);
                     count++;
-                    const td = document.querySelector(`td[data-row="${idx}"][data-key="${key}"]`);
+                    const tds = $('fullResultBody').querySelectorAll(`td[data-row="${idx}"]`);
+                    const td = Array.from(tds).find(cell => cell.dataset.key === key);
                     if (td) {
                         td.textContent = row[key];
                         if (mappingConfig[key].isRequired && row[key].trim() === '') {
@@ -1291,8 +1293,9 @@
             // 各種値の復元
             $('modalSplitSeparator').value = config.splitConfig.separator;
             $('modalSplitPart').value = config.splitConfig.part;
-            $('modalLengthCount').value = config.lengthConfig.length;
-            $('modalLengthPart').value = config.lengthConfig.part;
+            const lc = config.lengthConfig || { length: 2, part: 'first' };
+            $('modalLengthCount').value = lc.length;
+            $('modalLengthPart').value = lc.part;
             $('modalFormula').value = config.formula;
             $('modalFixedValue').value = config.fixedValue;
             $('modalUseZeroPad').checked = config.transforms.useZeroPad;
